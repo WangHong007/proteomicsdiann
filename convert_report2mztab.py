@@ -51,13 +51,12 @@ def convert_report2mztab(ctx, mztab, diann_report, unimod_csv, pg_matrix, pr_mat
     index_ref.loc[:, 'study_variable'] = index_ref.loc[:, 'study_variable'].astype('int')
     report.loc[:, 'ms_run'] = report.apply(lambda x: get_ms_run(x['Run'], index_ref), axis=1, result_type="expand")
     report.loc[:, 'ms_run'] = report.loc[:, 'ms_run'].astype('str')
-    #database = sys.argv[1]
     #charge = sys.argv[2]
     #missed_cleavages = sys.argv[3]
     (MTD, database) = mztab_MTD(index_ref, opms, report, unimod_data, fasta)
     RPH = mztab_RPH(report, pg, unique, index_ref, database)
     PEH = mztab_PEH(report, pr, unique, unimod_data, index_ref, database)
-    # PSH = mztab_PSH(unique, unimod_data, report)
+    PSH = mztab_PSH(unique, unimod_data, report)
     MTD.loc['', :] = ''
     RPH.loc[len(RPH) + 1, :] = ''
     PEH.loc[len(PEH) + 1, :] = ''
@@ -65,7 +64,7 @@ def convert_report2mztab(ctx, mztab, diann_report, unimod_csv, pg_matrix, pr_mat
         MTD.to_csv(f, mode='f+', index = False, header = False)
         RPH.to_csv(f, mode='f+', index = False, header = True)
         PEH.to_csv(f, mode='f+', index = False, header = True)
-        # PSH.to_csv(f, mode='f+', index = False, header = True)
+        PSH.to_csv(f, mode='f+', index = False, header = True)
     end = time.time()
     print("Total run time:{t}".format(t=end - start))
 
@@ -205,7 +204,7 @@ def mztab_PEH(report, pr, unique, unimod_data, index_ref, database):
     for i in null_col:
         out_mztab_PEH.loc[:, i] = 'null'
     out_mztab_PEH.loc[:, 'opt_global_cv_MS:1002217_decoy_peptide'] = '0'
-    # lack column [peptide_abundance_study_variable], calculate opt_global_mass_to_charge_study_variable and opt_global_retention_time_study_variable according to average value of each study_variable
+    # average value of each study_variable
     max_assay = max(index_ref['ms_run'])
     max_study_variable = max(index_ref['study_variable'])
     for i in range(1, max_assay + 1):                                                                                                                 
@@ -217,7 +216,6 @@ def mztab_PEH(report, pr, unique, unimod_data, index_ref, database):
         out_mztab_PEH[['peptide_abundance_stdev_study_variable[' + str(i) + ']', 'peptide_abundance_std_error_study_variable[' + str(i) + ']']] = out_mztab_PEH.apply(lambda x:('null', 'null'), axis = 1, result_type = 'expand')  
     out_mztab_PEH[["best_search_engine_score[1]", "retention_time", "opt_global_q-value", "opt_global_SpecEValue_score", "mass_to_charge"]] = out_mztab_PEH.apply(lambda x: 
                     PEHfrom_report(report, x["Precursor.Id"], ["Q.Value", "RT", "Global.Q.Value", "Lib.Q.Value", "Precursor.Mz"]), axis=1, result_type="expand")
-    #out_mztab_PEH.loc[:, "best_search_engine_score[1]"] = out_mztab_PEH.apply(lambda x: find_best_score(report, x['Precursor.Id'], 'Q.Value'), axis=1, result_type="expand")
     out_mztab_PEH[['opt_global_feature_id', 'spectra_ref']] = out_mztab_PEH.apply(lambda x:('null', 'null'),axis = 1, result_type = 'expand')
     ##opt_global_mass_to_charge_study_variable[n], opt_global_retention_time_study_variable[n]
     out_mztab_PEH = out_mztab_PEH.drop(['Precursor.Id', 'Genes'], axis = 1)
@@ -262,29 +260,6 @@ def classify_protein(target, unique, t, f):
         return t
     else:
         return f
-
-##useless
-def find_best_score(report, target, rep_col, col):
-    report.loc[:, rep_col] = report.loc[:, rep_col].astype('float')
-    match = report[report[col] == target]
-    score = min(match[rep_col])
-    return score
-
-##useless
-def RPH_find_best_score(report, target):
-    report.loc[:, 'Q.Value'] = report.loc[:, 'Q.Value'].astype('float')
-    match = report[report['Protein.Ids'] == target]
-    score = min(match['Q.Value'])
-    return score
-
-##useless
-def find_each_avrg_params(report, target, index_ref, study_variable, col):
-    target_file = index_ref[index_ref['study_variable'] == study_variable]['run'].values[0]
-    result = report[report['Precursor.Id'] == target]
-    match = result[result['Run'] == target_file]
-    for i in col:
-        param = match[i].mean() if match[i].values.size > 0 else np.nan
-        return param
 
 def find_each_params(report, target, index_ref, run, col, average):
     if average == 1:
