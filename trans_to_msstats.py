@@ -1,91 +1,75 @@
-import pandas as pd 
-import re
+#!/usr/bin/env python
+
+import pandas as pd
+import click
 import os
-import sys
-import time
+import re
 
-start = time.time()
-report = sys.argv[1]
-UNIMOD = sys.argv[2]
-experiment = sys.argv[3]
-rep = pd.read_csv(report, sep = "\t", header = 0, dtype = 'str')
-unimod = pd.read_csv(UNIMOD, sep = ",", header = 0, dtype = 'str')
+CONTEXT_SETTINGS = dict(help_option_names=['-h', '--help'])
+@click.group(context_settings=CONTEXT_SETTINGS)
+def cli():
+    pass
 
-rep1 = rep[['Protein.Names', 'Modified.Sequence', 'Precursor.Charge', 'PG.Quantity', 'File.Name']]
-rep1.columns = ['ProteinName', 'PeptideSequence', 'PrecursorCharge', 'Intensity', 'Reference']
-col_name = rep1.columns.tolist() 
-add_columns = ['FragmentIon', 'ProductCharge', 'IsotopeLabelType', 'Condition', 'BioReplicate', 'Run']
-for i in range(3, 9):
-    col_name.insert(i, add_columns[i-3])
-rep1 = rep1.reindex(columns = col_name)
-for i in range(0, len(rep1)):
-    rep1.loc[i, 'Reference'] = rep1.loc[i, 'Reference'].split('/')[-1] 
-    rep1.loc[i, 'FragmentIon'] = 'NA'
-    rep1.loc[i, 'ProductCharge'] = '0'
-    rep1.loc[i, 'IsotopeLabelType'] = 'L'
-    PTM = re.findall(re.compile(r'[(](.*?)[)]', re.S), rep1.loc[i, 'PeptideSequence'])               
-    if len(PTM) > 0:
-        for j in range(0, len(unimod)):
-            for m in range(0, len(PTM)):
-                if(PTM[m] == unimod.loc[j, 'id']):
-                    rep1.loc[i, 'PeptideSequence'] = re.sub(r'(?<=\().+?(?=\))', unimod.loc[j, 'name'], rep1.loc[i, 'PeptideSequence'])
-                if(rep1.loc[i, 'PeptideSequence'][0] == '('):
-                    rep1.loc[i, 'PeptideSequence'] = '.' + rep1.loc[i, 'PeptideSequence']
+@click.command("convert_report2msstats")
+@click.option("--mssats", "-ms",)
+@click.option("--diann_report", "-r",)
+@click.option("--exp_design", "-e")
+@click.option("--unimod_csv", "-u")
 
-    
-for i in range(0, len(rep1)):
-    file_extension = 'file_extension'
-    while(file_extension != ''):
-        file_name, file_extension = os.path.splitext(rep1.loc[i, 'Reference'])
-        rep1.loc[i, 'Reference'] = file_name
-    rep1.loc[i, 'Reference'] = rep1.loc[i, 'Reference'] + '.mzML'
+@click.pass_context
+def convert_report2msstats(ctx, diann_report, exp_design, unimod_csv):
+    report = pd.read_csv(diann_report, sep = "\t", header = 0, dtype = 'str')
+    unimod_data = pd.read_csv(unimod_csv, sep = ",", header = 0, dtype = 'str')
+    with open(exp_design, 'r') as f:
+        data = f.readlines()
+        empty_row = data.index('\n')
+        f_table = [i.replace("\n", '').split("\t") for i in data[1:empty_row]]
+        f_header = data[0].replace("\n", "").split("\t")
+        f_table = pd.DataFrame(f_table, columns=f_header)
+        f_table.loc[:,"run"] = f_table.apply(lambda x: os.path.basename(x["Spectra_Filepath"].split(".")[-2]), axis=1)
 
-##
-## 
-##
-# experiment = "C:\\Users\\Mr.HG\\Desktop\\expr.tsv"
-exper = pd.read_csv(experiment, sep = "\t", header = 0, dtype = 'str')
-for i in range(0, len(exper)):
-    if(exper.loc[i, 'Fraction_Group'] == 'Sample'):
-        len_df1 = i
-        len_df2 = len(exper) - len_df1
-df1 = exper.iloc[:len_df1,:]
-df2 = exper.iloc[len_df1:,:]
+        s_table = [i.replace("\n", '').split("\t") for i in data[empty_row + 1:]][1:]
+        s_header = data[empty_row + 1].replace("\n", "").split("\t")
+        s_DataFrame = pd.DataFrame(s_table, columns=s_header)
 
+    out_msstats = pd.DataFrame()
+    out_msstats = report[['Protein.Names', 'Modified.Sequence', 'Precursor.Charge', 'Precursor.Quantity', 'Run']]
+    out_msstats.columns = ['ProteinName', 'PeptideSequence', 'PrecursorCharge', 'Intensity', 'Reference']
+    out_msstats.loc[:,"PeptideSequence"] = out_msstats.apply(lambda x: convert_modification(x["PeptideSequence"], unimod_data), axis=1)
+    out_msstats.loc[:,"FragmentIon"] = 'NA'
+    out_msstats.loc[:,"ProductCharge"] = '0'
+    out_msstats.loc[:,"IsotopeLabelType"] = "L"
+    out_msstats.loc[:,"Run"] = out_msstats["Reference"]
 
-df1_col_name = df1.columns.tolist() 
-df1_add_columns = ['MSstats_Condition', 'MSstats_BioReplicate']
-for i in range(5, 7):
-    df1_col_name.insert(i, df1_add_columns[i-5])
-df1 = df1.reindex(columns = df1_col_name)
-df1 = df1.dropna(axis=0, subset=['Label'])
-for i in range(0, len(df1)):
-    for j in range(len_df1, len(exper)):
-        if(df2.loc[j, 'Fraction_Group'] == df1.loc[i, 'Sample']):
-            df1.loc[i, 'MSstats_Condition'] = df2.loc[j, 'Fraction']
-            df1.loc[i, 'MSstats_BioReplicate'] = df2.loc[j, 'Spectra_Filepath']
-    file_extension = 'file_extension'
-    while(file_extension != ''):
-        file_name, file_extension = os.path.splitext(df1.loc[i, 'Spectra_Filepath'])
-        df1.loc[i, 'Spectra_Filepath'] = file_name
-    df1.loc[i, 'Spectra_Filepath'] = df1.loc[i, 'Spectra_Filepath'] + '.mzML'
+    out_msstats[["Fraction", "BioReplicate", "Condition"]] = out_msstats.apply(lambda x: query_expdesign_value(x["Reference"], f_table, s_DataFrame),
+                                                axis=1, result_type="expand")
+    out_msstats = out_msstats[out_msstats["Intensity"] != 0]
+
+    out_msstats.to_csv('./out_msstats.csv', sep=',', index=False)
+
+def query_expdesign_value(reference, f_table, s_table):
+    query_reference = f_table[f_table["run"] == reference]
+    Fraction = query_reference["Fraction"].values[0]
+    row = s_table[s_table["Sample"] == query_reference['Sample'].values[0]]
+    BioReplicate = row["MSstats_BioReplicate"].values[0]
+    Condition = row["MSstats_Condition"].values[0]
+
+    return Fraction, BioReplicate, Condition
 
 
-##
-## 
-##
-for i in range(0, len(rep1)):
-    for j in range(0, len(df1)):
-        if df1.loc[j, 'Spectra_Filepath'] == rep1.loc[i, 'Reference']:
-            rep1.loc[i, 'Condition'] = df1.loc[j, 'MSstats_Condition']
-            rep1.loc[i, 'BioReplicate'] = df1.loc[j, 'MSstats_BioReplicate']
-            rep1.loc[i, 'Run'] = df1.loc[j, 'Fraction_Group']
+def convert_modification(peptide, unimod_data):
+    pattern = re.compile(r"\((.*?)\)")
+    origianl_mods = re.findall(pattern, peptide)
+    for mod in set(origianl_mods):
+        name = unimod_data[unimod_data["id"] == mod]["name"].values[0]
+        peptide = peptide.replace(mod, name)
+    if peptide.startswith("("):
+        peptide = peptide + "."
+    return peptide
 
 
-rep1 = rep1.dropna(axis=0, subset=['ProteinName'])
 
-rep1.to_csv(path_or_buf='./MSstats.csv', sep=',', index=False)
-print(rep1)
+cli.add_command(convert_report2msstats)
 
-end = time.time()
-print("Run time:{t}".format(t=end - start))
+if __name__ == "__main__":
+    cli()
